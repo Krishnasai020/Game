@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sliding Puzzle — DevOps Mini Puzzle</title>
+  <style>
+    :root{--bg:#071024;--card:#071726;--muted:#9fb0c8;--accent:#0ea5a0}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial}
+    body{background:linear-gradient(180deg,var(--bg),#021428);display:flex;align-items:center;justify-content:center;color:#e6eef8}
+    .card{width:560px;max-width:95%;background:rgba(255,255,255,0.03);border-radius:14px;padding:22px;box-shadow:0 8px 30px rgba(2,6,23,0.6)}
+    .header{display:flex;align-items:center;justify-content:space-between}
+    h1{margin:0;font-size:20px}
+    .meta{color:var(--muted);font-size:13px}
+    .game{display:flex;gap:20px;margin-top:18px;align-items:center}
+    .board{width:360px;height:360px;background:rgba(255,255,255,0.02);border-radius:12px;display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:10px}
+    .tile{display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:700;border-radius:8px;cursor:pointer;background:linear-gradient(180deg,#0ea5a0,#087f76);color:#021428}
+    .tile.empty{background:transparent;box-shadow:none;cursor:default}
+    .controls{display:flex;flex-direction:column;gap:12px}
+    .pill{background:rgba(255,255,255,0.05);padding:8px;border-radius:8px}
+    button{background:#0ea5a0;border:none;color:#021428;padding:10px;border-radius:8px;font-weight:700;cursor:pointer}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div>
+        <h1>Sliding Puzzle</h1>
+        <div class="meta">Move tiles to arrange 1–8 in order.</div>
+      </div>
+      <small class="meta">Health: <span id="health">—</span></small>
+    </div>
+
+    <div class="game">
+      <div class="board" id="board"></div>
+
+      <div class="controls">
+        <div class="pill">Moves: <strong id="moves">0</strong></div>
+        <div class="pill">Best: <strong id="best">—</strong></div>
+        <button id="shuffleBtn">Shuffle</button>
+        <button id="solveBtn">Solve</button>
+        <button id="resetBtn">Reset Score</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  const boardEl = document.getElementById('board');
+  const movesEl = document.getElementById('moves');
+  const bestEl = document.getElementById('best');
+  const shuffleBtn = document.getElementById('shuffleBtn');
+  const solveBtn = document.getElementById('solveBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const healthEl = document.getElementById('health');
+
+  let state = [];
+  let moves = 0;
+
+  try { bestEl.textContent = localStorage.getItem("p_best") || "—"; } catch(e){}
+
+  async function health(){
+    try{
+      const r = await fetch('/healthz');
+      const j = await r.json();
+      healthEl.textContent = j.status;
+    }catch(e){ healthEl.textContent="down"; }
+  }
+  health(); setInterval(health, 10000);
+
+  function reset(){
+    state = [1,2,3,4,5,6,7,8,0];
+    moves = 0;
+    render();
+  }
+
+  function render(){
+    boardEl.innerHTML = "";
+    state.forEach((v,i)=>{
+      const d = document.createElement("div");
+      d.className = v===0 ? "tile empty" : "tile";
+      d.textContent = v===0 ? "" : v;
+      d.onclick = ()=>move(i);
+      boardEl.appendChild(d);
+    });
+    movesEl.textContent = moves;
+  }
+
+  function isAdj(a,b){
+    const ra=Math.floor(a/3), rb=Math.floor(b/3);
+    const ca=a%3, cb=b%3;
+    return (ra===rb && Math.abs(ca-cb)===1) ||
+           (ca===cb && Math.abs(ra-rb)===1);
+  }
+
+  function move(i){
+    const zero=state.indexOf(0);
+    if(!isAdj(i,zero)) return;
+    [state[i],state[zero]]=[state[zero],state[i]];
+    moves++;
+    render();
+    if(isSolved()) win();
+  }
+
+  function isSolved(){
+    return JSON.stringify(state) === JSON.stringify([1,2,3,4,5,6,7,8,0]);
+  }
+
+  function win(){
+    setTimeout(()=>{
+      alert("Solved in "+moves+" moves!");
+      try{
+        const prev = Number(localStorage.getItem("p_best") || Infinity);
+        if(moves < prev) localStorage.setItem("p_best",moves), bestEl.textContent=moves;
+      }catch(e){}
+    },100);
+  }
+
+  function shuffle(){
+    let arr;
+    do{
+      arr=[1,2,3,4,5,6,7,8,0].sort(()=>Math.random()-0.5);
+    }while(!solvable(arr));
+    state=arr; moves=0; render();
+  }
+
+  function solvable(arr){
+    const a=arr.filter(x=>x!==0);
+    let inv=0;
+    for(let i=0;i<a.length;i++)
+      for(let j=i+1;j<a.length;j++) if(a[i]>a[j]) inv++;
+    return inv%2===0;
+  }
+
+  shuffleBtn.onclick=shuffle;
+  solveBtn.onclick=reset;
+  resetBtn.onclick=()=>{localStorage.removeItem("p_best");bestEl.textContent="—";};
+
+  reset();
+})();
+</script>
+</body>
+</html>
