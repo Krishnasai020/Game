@@ -1,0 +1,123 @@
+pipeline {
+  agent any
+
+  tools {
+    nodejs 'nodejs'   // must match Jenkins tool name
+  }
+
+  environment {
+         // ---- NEXUS ----
+    NEXUS_URL = 'http://54.234.246.236:8081'
+    NEXUS_REPO = 'raw-hosted'
+    NEXUS_CREDENTIALS = 'nexus-credentials'
+    DOCKER_IMAGE = "krishnasaipasunuri/devops-mini-puzzle"
+  }
+
+  stages {
+
+    stage('Get Code from Git') {
+      steps {
+        git url: 'https://github.com/Krishnasai020/Game.git',
+            branch: 'main'
+      }
+    }
+
+    stage('Install Dependencies') {
+      steps {
+        sh 'npm install'
+      }
+    }
+    
+    stage('Dependency Check') {
+  steps {
+    sh '''
+      if [ -d "node_modules" ]; then
+        echo "✅ Dependencies installed"
+        npm list --depth=0
+      else
+        echo "❌ Dependencies missing"
+        exit 1
+      fi
+    '''
+  }
+}
+    stage('Sonar Scan') {
+      steps {
+        withSonarQubeEnv('sonarqube') {
+          sh '''
+            npx sonar-scanner \
+            -Dsonar.projectKey=minigame \
+            -Dsonar.sources=.
+          '''
+        }
+      }
+    }
+   stage ("Quality Gates") {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: true, credentialsId: 'mysonarqube'
+                }
+            }
+        }
+     stage('Build Artifact') {
+      steps {
+        sh '''
+          mkdir -p dist
+          tar -czf dist/devops-mini-puzzle-${BUILD_NUMBER}.tar.gz \
+            server.js public package.json Dockerfile
+        '''
+      }
+    }
+
+    /* ============================
+       6. Upload Artifact to Nexus
+       ============================ */
+    stage('Upload Artifact to Nexus') {
+      steps {
+        withCredentials([usernamePassword(
+          credentialsId: "${NEXUS_CREDENTIALS}",
+          usernameVariable: 'NEXUS_USER',
+          passwordVariable: 'NEXUS_PASS'
+        )]) {
+          sh """
+            curl -u ${NEXUS_USER}:${NEXUS_PASS} \
+              --upload-file dist/devops-mini-puzzle-${BUILD_NUMBER}.tar.gz \
+              ${NEXUS_URL}/repository/${NEXUS_REPO}/devops-mini-puzzle/${BUILD_NUMBER}/devops-mini-puzzle-${BUILD_NUMBER}.tar.gz
+          """
+        }
+      }
+    }
+
+    stage('Build Docker Image') {
+      steps {
+        sh 'docker build -t $DOCKER_IMAGE:$BUILD_NUMBER .'
+      }
+    }
+    
+    stage('Trivy Scan') {
+  steps {
+    sh '''
+      trivy image --severity HIGH,CRITICAL \
+      --no-progress \
+      $DOCKER_IMAGE:$BUILD_NUMBER
+    '''
+  }
+}
+
+    stage('Push Docker Image') {
+      steps {
+        withCredentials([usernamePassword(
+          credentialsId: 'dockerhub-creds',
+          usernameVariable: 'DOCKER_USER',
+          passwordVariable: 'DOCKER_PASS'
+        )]) {
+          sh '''
+            echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+            docker push $DOCKER_IMAGE:$BUILD_NUMBER
+            docker logout
+          '''
+        }
+      }
+    }
+  }
+}
